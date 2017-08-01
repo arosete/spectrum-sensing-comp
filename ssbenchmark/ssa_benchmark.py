@@ -21,6 +21,8 @@ Created on Jul 10, 2017
 # The tool is used to perform calculations related to the Tracy-Widom distribution
 # which is utilized in the threshold-setting functions of some SSAs
 
+
+
 # Use Numpy for mathematics
 import numpy
 # Use Scipy for Linear Algebra
@@ -294,6 +296,46 @@ def EnergyWithMinimumEigenvalueThreshold(x, L, pfa):
     M = 1  # Number of antennas
     return((numpy.sqrt(2 / (M * Ns)) * InverseQFunction(pfa) + 1) * (Ns / (numpy.sqrt(Ns) - numpy.sqrt(M * L)) ** 2))
 
+def MaximumEigenvalueTraceDetection(x, L):
+    """
+    MaximumEigenvalueTraceDetection computes the spectrum sensing test statistic according to
+    Pu Wang, Jun Fang, Ning Han, and Hongbin Li, Multiantenna-Assisted Spectrum Sensing for Cognitive Radio, Equation 13
+    
+    Parameters:
+    :param x: received signal samples (float32 list)
+    :param L: covariance window size (integer)
+    
+    Returns:
+    :return test statistic (float32)
+    """
+    Rx = StatCovarianceMatrix(x, L)
+    eigenvalues = numpy.linalg.eigvalsh(Rx)
+    # The sum of the eigenvalues is the same as the trace of Rx
+    return(eigenvalues[0] / sum(eigenvalues))
+
+def CyclicAutocorrelationDetection(x):
+    """
+    CyclicAutocorrelationDetection calculates the time domain cyclostationarity of a set of samples according to
+    Ning Han, Guanbo Zheng, Sung Hwan Sohn, and Jae Moung Kim, Cyclic Autocorrelation based Blind OFDM Detection and Identification for Cognitive Radio, Section III
+
+    Parameters:
+    :param x: signal samples (float32 list)
+    
+    Returns:
+    :return ca: cyclic autocorrelation test statistic (float32)
+    """
+    A = numpy.var(x) # variance of the symbol sequence
+    df = 10 # subcarrier spacing
+    Tu = 1 / df # useful symbol duration
+    Tg = 1E-6 # guard interval duration
+    Ts = Tu + Tg # symbol duration Ts = Tu + Tg
+    # todo
+    pass
+    
+def SpectralCorrelationDetection(x):
+    # todo
+    pass
+
 def BuildStepsList(ivs, vsi, fvs):
     """
     BuildStepsList builds a list containing numbers from a starting value up to a final value in given increments.
@@ -413,6 +455,52 @@ def GenerateThreshold(ssa, x, L, pfa):
     else:
         gamma_0 = EnergyDetection(x)
     return(gamma_0)
+
+def LoadLTESamples(snr_db):
+    """
+    LoadLTESamples loads LTE samples from a file into memory.
+    
+    Parameters:
+    :param n: number of samples to load (integer)
+    
+    Returns:
+    :return LTE samples (complex32)
+    """
+    file = open("C:/signalsamples/ltesample.dat", "r")
+    x = []
+    i = 0
+    for line in file:
+        i = i + 1
+        line = line.replace("\n", "")
+        line = line.replace("i", "j")
+        line = line.replace(" ", "")
+        value = LinearSNR(snr_db) * complex(line)
+        x.append(value)
+    return(x)
+
+def LoadWIFISamples(snr_db):
+    """
+    LoadWIFISamples loads WIFI samples from a file into memory.
+    
+    Parameters:
+    :param n: number of samples to load (integer)
+    
+    Returns:
+    :return WIFI samples (complex32)
+    """
+    file = open("C:/signalsamples/wifi_80211ac_samples.dat", "r")
+    x = []
+    i = 0
+    for line in file:
+        #print(line)
+        i = i + 1
+        line = line.replace("\n", "")
+        line = line.replace("i", "j")
+        line = line.replace(" ", "")
+        #print(line)
+        value = LinearSNR(snr_db) * complex(line) * 1.0
+        x.append(value)
+    return(x)
     
 def GenerateSignal(st, snr_db, n):
     """
@@ -630,8 +718,55 @@ def GenerateGamma(ssa, x, L):
         return(CovarianceFrobeniusNormDetection(x, L))
     elif(ssa == "mme"):
         return(MaximumMinimumEigenvalueDetection(x, L))
+    elif(ssa == "eme"):
+        return(EnergyWithMinimumEigenvalueDetection(x, L))
     else:
         return(EnergyDetection(x))
+    
+def GenerateRatings(ssa, st, nct, L, nt, snr_db, n):
+    """
+    GenerateRatings generates a list of test statistics and a list of binary signal present/not present values.
+    
+    Parameters:
+    :param ssa: specturm sensing algorithm (string)
+    :param st: signal type (string)
+    :param nct: noise channel type (string)
+    :param L: covariance window size (int32)
+    :param nt: number of Monte Carlo trials (int32)
+    :param snr_db: signal-to-noise ratio in decibels (float32)
+    :param n: number of samples per trial (int32)
+    
+    Returns:
+    :return tss: test statistics (float32 list)
+    :return sps: signal presences (int32 list)
+    """
+    st = st.lower()
+    nct = nct.lower()
+    tss = []
+    sps = []
+    samples = []
+    # case signal not present
+    if(st == "lte"):
+        samples = LoadLTESamples(snr_db)
+    elif(st == "wlan" or st == "wifi"):
+        samples = LoadWIFISamples(snr_db)
+        #todo add wifi function
+    for i in range(0, nt):
+        #print(i)
+        x = GenerateNoise(nct, n)
+        gamma_np = GenerateGamma(ssa, x, L)
+        tss.append(gamma_np)
+        sps.append(0)
+        if(st == "lte"):
+            floor = numpy.random.randint(0, len(samples) - n)
+            ceiling = floor + n
+            y = samples[floor : ceiling] + GenerateNoise(nct, n)
+        else:
+            y = GenerateSignal(st, snr_db, n) + GenerateNoise(nct, n)
+        gamma_p = GenerateGamma(ssa, y, L)
+        tss.append(gamma_p)
+        sps.append(1)
+    return(tss, sps)
 
 def CalculateFPG(ssa, n, st, nct, nmc, snr_db, pfa, L):
     """
@@ -722,7 +857,9 @@ def CalculateTPR(ssa, n, st, nct, nmc, snr_db, c, L):
     tpr = 0
     for mc in range(nmc):
         assert(mc >= 0)
-        x = GenerateSignal(st, snr_db, n) + GenerateNoise(nct, n)
+        ps = GenerateSignal(st, snr_db, n)
+        fs = GenerateNoise(nct, n)
+        x = ps + fs 
         gamma = GenerateGamma(ssa, x, L)
         if(gamma >= c):
             tpr = tpr + 1
@@ -746,13 +883,9 @@ def CalculateRatings(ssa, st, nct, L, nmc, c, n, snr_db):
     :return fpr: false positive ratio (float32)
     :return tpr: true positive ratio (float32)
     """
-    fpr = 0
-    tpr = 0
-    for mc in range(nmc):
-        assert(mc >= 0)
-        fpr = fpr + CalculateFPR(ssa, n, nct, 1, c, L)
-        tpr = tpr + CalculateTPR(ssa, n, st, nct, 1, snr_db, c, L)
-    return(fpr / nmc, tpr / nmc)
+    fpr = CalculateFPR(ssa, n, nct, nmc, c, L)
+    tpr = CalculateTPR(ssa, n, st, nct, nmc, snr_db, c, L)
+    return(fpr, tpr)
     
 def ROCTest(tt, ssa, st, nct, start, increment, end, nmc, L, n, snr_db):
     """
@@ -795,11 +928,11 @@ def ROCTest(tt, ssa, st, nct, start, increment, end, nmc, L, n, snr_db):
     :return steps: steps of the varying parameter (numeric list)
     """
     steps = BuildStepsList(start, increment, end)
-    print("steps: " + str(steps))
+    #print("steps: " + str(steps))
     Xs = []
     Ys = []
     for c in steps:
-        print(str(c))
+        #print(str(c))
         X, Y = CalculateRatings(ssa, st, nct, L, nmc, c, n, snr_db)
         Xs.append(X)
         Ys.append(Y)
@@ -898,38 +1031,39 @@ def FastDeLong(X, Y):
     q is total classifiers
     
     Parameters:
-    :param X: (q × m matrix of class 1 ratings) scores for m signal absent cases 
-    :param Y: (q × n matrix of class 2 ratings) scores for n signal present cases
+    :param X: (1 × m matrix of class 1 ratings) scores for m signal absent cases 
+    :param Y: (1 × n matrix of class 2 ratings) scores for n signal present cases
     
     Returns:
     :return AUC: (q × 1 vector of AUC estimates)
     :return S: (q × q covariance matrix)
     """
-    
-    w, m = (len(X), len(X))
-    q, n = (len(Y), len(Y))
-    assert(w == q)
+    q, m = (1, len(X))
+    q, n = (1, len(Y))
+    print(q)
+    print(m)
+    print(n)
     V10 = []
     V01 = []
-    # x indices in z
     xi = range((n), (m + n))
-    # y indices in z
+    print(xi)
     yj = range(0, n)
+    print(yj)
     for k in range(0, q):
         x = X[k:]
         y = Y[k:]
-        z = (x, y)
+        z = x + y
         TX = scipy.stats.rankdata(x)
+        print(TX)
         TY = scipy.stats.rankdata(y)
+        print(TY)
         TZ = scipy.stats.rankdata(z)
-        # Compute the structural components
-        print(q)
+        print(TZ)
         V10[:k] = 1 - (TZ[xi] - TX) / n
+        print(V10)
         V01[:k] = (TZ[yj] - TY) / m
-        
     AUC = numpy.mean(V01)
     S = (numpy.cov(V10) / m) + (numpy.cov(V01) / n)
-    
     return(AUC, S)
 
 def npAUC_CI(alpha1, alpha2, X, Y):
@@ -1002,15 +1136,174 @@ def npAUC_CI(alpha1, alpha2, X, Y):
             AUC_CI[2] = 1
         else:
             AUC_CI[2] = AUCdiff + scipy.stats.norm.ppf(1 - alpha2) * numpy.sqrt(var_diff)
-        
-fpr, tpr = ROCTest(tt = "roc", ssa = "ed", st = "Gaussian", nct = "Gaussian", start = 0, increment = 0.01, end = 2, nmc = 1000, L = 10, n = 1000, snr_db = -13)
-# AUC, S = FastDeLong(fpr, tpr)
-# print(str(AUC))
-# print(str(S))
+            
+def SNRTSTest(ssa, st, nct, start, increment, end, nmc, L, n):
+    """
+    
+    Parameters:
+    :param ssa: spectrum sensing algorithm (string)
+        ed: Energy Detection
+        cav: Covariance Absolute Value
+        cfn: Covariance Frobenius Norm
+        mme: Maximum-Minimum Eigenvalue
+        eme: Energy with Minimum Eigenvalue
+        agm: Arithmetic-to-Geometric Mean
+        met: Maximum Eigenvalue to the Trace
+        caf: Cyclic Autocorrelation Function
+        scf: Spectral Correlation Function
+        (default): Energy Detection
+    :param st: signal type (string)
+    :param nct: noise channel type (string)
+    :param start: initial SNR value in dB (float32)
+    :param increment: incremental SNR value in dB (float32)
+    :param end: final SNR value in dB (float32)
+    :param nmc: number of Monte Carlo trials per step (int)
+    :param L: covariance window size (int)
+    :param n: number of samples (int)
+    
+    Returns:
+    :return tss: test statistic values (float32 list)
+    """
+    snrs = BuildStepsList(ivs = start, vsi = increment, fvs = end)
+    tss = []
+    ssa = ssa.lower()
+    for snr in snrs:
+        ts = 0
+        x = GenerateSignal(st, snr, n) + GenerateNoise(nct, n)
+        if(ssa == "ed"):
+            ts = EnergyDetection(x)
+        elif(ssa == "cav"):
+            ts = CovarianceAbsoluteValueDetection(x, L)
+        elif(ssa == "cfn"):
+            ts = CovarianceFrobeniusNormDetection(x, L)
+        elif(ssa == "mme"):
+            ts = MaximumMinimumEigenvalueDetection(x, L)
+        elif(ssa == "eme"):
+            ts = EnergyWithMinimumEigenvalueDetection(x, L)
+        elif(ssa == "agm"):
+            ts = ArithmeticToGeometricMeanDetection(x, L)
+        elif(ssa == "met"):
+            ts = MaximumEigenvalueTraceDetection(x, L)
+        elif(ssa == "caf"):
+            pass
 
-figure1 = plt.figure(1)
-plt.scatter(fpr, tpr)
-figure1.suptitle("Energy Detection ROC")
-plt.xlabel("False Positive Rate")
-plt.ylabel("True Positive Rate")
-plt.show()
+def calculate_roc (data, labels):
+    """
+    calculate_roc calculates true positive rates and false positive rates to build an ROC curve.
+    It also calculates the area under the curve (AUC) and the AUC-based symmetry of the ROC curve.
+    Thanks to Max Lees (william.lees@nist.gov) for providing the fast ROC and AUC functions.
+    Modified by André Rosete (andre.rosete@nist.gov) to calculate symmetry.
+        
+    Parameters:
+    :param data: true positive rates (float32 list)
+    :param labels: signal present or not present (int32 list)
+        
+    Returns:
+    None. Plots ROC curve and line.
+    """
+    #print(data)
+    #print(labels)
+    labels = numpy.array(labels)
+    total_samples = len(labels)
+    total_positive = numpy.sum(labels)
+    if total_positive == 0:
+        return
+    total_negative = total_samples - total_positive
+    indices = numpy.argsort(data)
+    labels = labels[numpy.flipud(indices)]
+    true_positive_rate = []
+    false_positive_rate = []
+    current_true_positives = total_positive
+    current_false_positives = total_negative
+    true_positive_rate.append(1.0)
+    false_positive_rate.append(1.0)
+    for index in range(total_samples):
+        if labels[index] == 1:
+            current_true_positives = current_true_positives - 1
+        else:
+            current_false_positives = current_false_positives - 1
+        true_positive_rate.append(current_true_positives / total_positive)
+        false_positive_rate.append(current_false_positives / total_negative)
+    linear = numpy.linspace(0, 1)
+    g = []
+    g.append(0.0)
+    auc = 0.0
+    auc1 = 0.0
+    auc2 = 0.0
+    for i in range(0, len(false_positive_rate) - 1):
+        g.append(1 - false_positive_rate[i])
+        height = true_positive_rate[i]
+        width = false_positive_rate[i] - false_positive_rate[i + 1]
+        area = height * width
+        auc = auc + area
+        if(height >= g[i]):
+            height2 = height - g[i]
+            area2 = height2 * width
+            auc2 = auc2 + area2
+    auc_or = auc
+    if(auc_or == 0):
+        auc_or = 1e-6
+        auc1 = 0.5
+        auc2 = 0.5
+    else:
+        auc1 = auc - auc2
+        auc = 1 - auc
+        auc1 = (auc1 / auc_or) * auc
+        auc2 = (auc2 / auc_or) * auc
+    
+    symmetry = 1 - abs((auc1 - auc2) / 2)
+    
+#     for i in range(len(true_positive_rate)-1):
+#         auc = auc + ((true_positive_rate[i]-true_positive_rate[i+1])*false_positive_rate[i])
+#     print('AUC: %s' % (auc))
+
+#     plt.plot(true_positive_rate, false_positive_rate)
+#     plt.plot(g, false_positive_rate)
+#     plt.plot(linear, linear)
+#     plt.title("SSA Receiver Operating Characteristic")
+#     plt.xlabel("False Positive Rate")
+#     plt.ylabel("True Positive Rate")
+#     plt.show()
+    return(auc, symmetry, true_positive_rate, false_positive_rate)
+    
+def auc_vs_n(ssa, st, nct, L, nt, auct, snr_db, N):
+    auc = []
+    sym = []
+    average_auc = 0.0
+    average_sym = 0.0
+    for n in N:
+        print("Number of samples: " + str(n))
+        data, labels = GenerateRatings(ssa, st, nct, L, nt, snr_db, n)
+        current_auc, current_sym, tpr, fpr = calculate_roc(data, labels)
+        average_auc = average_auc + current_auc
+        average_symmetry = average_sym + current_sym
+        auc.append(current_auc)
+        sym.append(current_sym)
+    #plt.plot(N[1:], auc[1:])
+    #plt.plot(N[1:], sym[1:])
+    #plt.axhline(y = 0.5, color = 'r', linestyle = '-')
+    #plt.title("AUC vs. N")
+    #plt.xlabel("Number of Samples")
+    #plt.ylabel("Area under the Curve")
+    #plt.show()
+    return(auc, sym)
+    
+def SNR_auc_vs_n(ssa, st, nct, L, nt, auct, snr_dbs, N):
+    snr_dbs = BuildStepsList(snr_dbs[0], snr_dbs[1], snr_dbs[2])
+    N = BuildStepsList(N[0], N[1], N[2])
+    print(snr_dbs)
+    for snr_db in snr_dbs:
+        print("SNR (dB): " + str(snr_db))
+        
+        auc, sym = auc_vs_n(ssa, st, nct, L, nt, auct, snr_db, N)
+        plt.plot(N[1:], auc[1:], label = "SNR (dB): " + str(snr_db))
+    
+    plt.title(ssa + ", " + st + ", " + nct + ", L = " + str(L) + ", MCT = " + str(nt) + ", AUC vs. N")
+    plt.xlabel("Number of Samples")
+    plt.ylabel("Area Under ROC Curve")
+    plt.legend()
+    plt.show()
+
+SNR_auc_vs_n(ssa = "cav", st = "wifi", nct = "Gaussian", L = 10, nt = 10000, auct = 1, snr_dbs = [-12, 3, 12], N = [100, 1000, 10000])
+# data, labels = GenerateRatings(ssa = "ed", st = "lte", nct = "Gaussian", L = 100, nt = 1000, snr_db = 10, n = 1000)
+# calculate_roc(data, labels)
