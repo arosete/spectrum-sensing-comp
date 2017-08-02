@@ -372,7 +372,7 @@ def LinearSNR(snr_db):
     Return:
     :return: linear signal-to-noise ratio (float32, (0, 1))
     """
-    return(10 ** (snr_db / 10))
+    return(10.0 ** (snr_db / 10.0))
 
 def MCTrial(ssa, st, nct, snr_db, n, pfa, L):
     """ 
@@ -456,7 +456,7 @@ def GenerateThreshold(ssa, x, L, pfa):
         gamma_0 = EnergyDetection(x)
     return(gamma_0)
 
-def LoadLTESamples(snr_db):
+def LoadLTESamples():
     """
     LoadLTESamples loads LTE samples from a file into memory.
     
@@ -474,11 +474,11 @@ def LoadLTESamples(snr_db):
         line = line.replace("\n", "")
         line = line.replace("i", "j")
         line = line.replace(" ", "")
-        value = LinearSNR(snr_db) * complex(line)
+        value = complex(line)
         x.append(value)
     return(x)
 
-def LoadWIFISamples(snr_db):
+def LoadWIFISamples():
     """
     LoadWIFISamples loads WIFI samples from a file into memory.
     
@@ -498,7 +498,7 @@ def LoadWIFISamples(snr_db):
         line = line.replace("i", "j")
         line = line.replace(" ", "")
         #print(line)
-        value = LinearSNR(snr_db) * complex(line) * 1.0
+        value = complex(line)
         x.append(value)
     return(x)
     
@@ -525,7 +525,7 @@ def GenerateSignal(st, snr_db, n):
         return(numpy.sqrt(snr) * numpy.random.normal(loc, scale, n))
     # If signal type is invalid or not given just generate a Gaussian (white noise) type of signal
     else:
-        return(numpy.sqrt(snr) * numpy.random.normal(0, 1, n))
+        return(-1.0 * snr * numpy.random.normal(0, 1, n))
     
 # Generate Noise
 # Arguments:
@@ -745,19 +745,25 @@ def GenerateRatings(ssa, st, nct, L, nt, snr_db, n):
     tss = []
     sps = []
     samples = []
+    snr = LinearSNR(snr_db)
     # case signal not present
     if(st == "lte"):
-        samples = LoadLTESamples(snr_db)
+        ltesamples = LoadLTESamples()
+        for sample in ltesamples:
+            current_sample = numpy.sqrt(snr) * sample
+            samples.append(current_sample)
     elif(st == "wlan" or st == "wifi"):
-        samples = LoadWIFISamples(snr_db)
-        #todo add wifi function
+        wifisamples = LoadWIFISamples()
+        for sample in wifisamples:
+            current_sample = numpy.sqrt(snr) * sample
+            samples.append(current_sample);
     for i in range(0, nt):
         #print(i)
         x = GenerateNoise(nct, n)
         gamma_np = GenerateGamma(ssa, x, L)
         tss.append(gamma_np)
         sps.append(0)
-        if(st == "lte"):
+        if((st == "lte") or (st == "wifi") or (st == "wlan")):
             floor = numpy.random.randint(0, len(samples) - n)
             ceiling = floor + n
             y = samples[floor : ceiling] + GenerateNoise(nct, n)
@@ -1247,11 +1253,11 @@ def calculate_roc (data, labels):
         auc2 = 0.5
     else:
         auc1 = auc - auc2
-        auc = 1 - auc
+        auc = 1.0 - auc
         auc1 = (auc1 / auc_or) * auc
         auc2 = (auc2 / auc_or) * auc
     
-    symmetry = 1 - abs((auc1 - auc2) / 2)
+    symmetry = 1.0 - abs((auc1 - auc2) / 2.0)
     
 #     for i in range(len(true_positive_rate)-1):
 #         auc = auc + ((true_positive_rate[i]-true_positive_rate[i+1])*false_positive_rate[i])
@@ -1298,12 +1304,12 @@ def SNR_auc_vs_n(ssa, st, nct, L, nt, auct, snr_dbs, N):
         auc, sym = auc_vs_n(ssa, st, nct, L, nt, auct, snr_db, N)
         plt.plot(N[1:], auc[1:], label = "SNR (dB): " + str(snr_db))
     
-    plt.title(ssa + ", " + st + ", " + nct + ", L = " + str(L) + ", MCT = " + str(nt) + ", AUC vs. N")
+    plt.title("AUC vs. N, SSA: " + ssa + ", signal: " + st + ", noise: " + nct + ", window: " + str(L) + ", trials: " + str(nt))
     plt.xlabel("Number of Samples")
     plt.ylabel("Area Under ROC Curve")
     plt.legend()
     plt.show()
 
-SNR_auc_vs_n(ssa = "cav", st = "wifi", nct = "Gaussian", L = 10, nt = 10000, auct = 1, snr_dbs = [-12, 3, 12], N = [100, 1000, 10000])
+SNR_auc_vs_n(ssa = "mme", st = "wifi", nct = "Gaussian", L = 10, nt = 1000, auct = 1, snr_dbs = [-20, 10, 20], N = [100, 100, 1000])
 # data, labels = GenerateRatings(ssa = "ed", st = "lte", nct = "Gaussian", L = 100, nt = 1000, snr_db = 10, n = 1000)
 # calculate_roc(data, labels)
